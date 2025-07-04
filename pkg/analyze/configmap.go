@@ -36,12 +36,9 @@ func (a *AnalyzeConfigMap) Analyze(getFile getCollectedFileContents, findFiles g
 
 func (a *AnalyzeConfigMap) analyzeConfigMap(analyzer *troubleshootv1beta2.AnalyzeConfigMap, getCollectedFileContents func(string) ([]byte, error)) (*AnalyzeResult, error) {
 	filename := collect.GetConfigMapFileName(
-		&troubleshootv1beta2.ConfigMap{
-			Namespace: analyzer.Namespace,
-			Name:      analyzer.ConfigMapName,
-			Key:       analyzer.Key,
-		},
+		analyzer.Namespace,
 		analyzer.ConfigMapName,
+		analyzer.Key,
 	)
 
 	configMapData, err := getCollectedFileContents(filename)

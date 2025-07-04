@@ -29,8 +29,7 @@ type MergeableCollector interface {
 	Merge(allCollectors []Collector) ([]Collector, error)
 }
 
-//type Collectors []*Collector
-
+// type Collectors []*Collector
 func isExcluded(excludeVal *multitype.BoolOrString) (bool, error) {
 	if excludeVal == nil {
 		return false, nil
@@ -53,7 +52,6 @@ func isExcluded(excludeVal *multitype.BoolOrString) (bool, error) {
 }
 
 func GetCollector(collector *troubleshootv1beta2.Collect, bundlePath string, namespace string, clientConfig *rest.Config, client kubernetes.Interface, sinceTime *time.Time) (interface{}, bool) {
-
 	ctx := context.TODO()
 
 	var RBACErrors []error
@@ -71,6 +69,8 @@ func GetCollector(collector *troubleshootv1beta2.Collect, bundlePath string, nam
 		return &CollectConfigMap{collector.ConfigMap, bundlePath, namespace, clientConfig, client, ctx, RBACErrors}, true
 	case collector.Logs != nil:
 		return &CollectLogs{collector.Logs, bundlePath, namespace, clientConfig, client, ctx, sinceTime, RBACErrors}, true
+	case collector.AllLogs != nil:
+		return &CollectAllLogs{collector.AllLogs, bundlePath, namespace, clientConfig, client, ctx, RBACErrors}, true
 	case collector.Run != nil:
 		return &CollectRun{collector.Run, bundlePath, namespace, clientConfig, client, ctx, RBACErrors}, true
 	case collector.RunPod != nil:
@@ -94,6 +94,8 @@ func GetCollector(collector *troubleshootv1beta2.Collect, bundlePath string, nam
 			RetryFailedMount: true,
 			RBACErrors:       RBACErrors,
 		}, true
+	case collector.ExecCopyFromHost != nil:
+		return &CollectExecCopyFromHost{collector.ExecCopyFromHost, bundlePath, namespace, clientConfig, client, ctx, RBACErrors}, true
 	case collector.HTTP != nil:
 		return &CollectHTTP{collector.HTTP, bundlePath, namespace, clientConfig, client, RBACErrors}, true
 	case collector.Postgres != nil:
@@ -156,6 +158,10 @@ func getCollectorName(c interface{}) string {
 		collector = "logs"
 		name = v.Collector.CollectorName
 		selector = strings.Join(v.Collector.Selector, ",")
+	case *CollectAllLogs:
+		collector = "all-logs"
+		name = v.Collector.CollectorName
+		selector = strings.Join(v.Collector.Selector, ",")
 	case *CollectRun:
 		collector = "run"
 		name = v.Collector.CollectorName
@@ -178,6 +184,9 @@ func getCollectorName(c interface{}) string {
 		selector = strings.Join(v.Collector.Selector, ",")
 	case *CollectCopyFromHost:
 		collector = "copy-from-host"
+		name = v.Collector.CollectorName
+	case *CollectExecCopyFromHost:
+		collector = "exec-copy-from-host"
 		name = v.Collector.CollectorName
 	case *CollectHTTP:
 		collector = "http"

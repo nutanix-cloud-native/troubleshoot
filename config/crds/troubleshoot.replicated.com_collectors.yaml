@@ -255,6 +255,35 @@ spec:
                       required:
                       - selector
                       type: object
+                    allLogs:
+                      properties:
+                        collectorName:
+                          type: string
+                        containerNames:
+                          items:
+                            type: string
+                          type: array
+                        exclude:
+                          type: BoolString
+                        limits:
+                          properties:
+                            maxAge:
+                              type: string
+                            maxLines:
+                              format: int64
+                              type: integer
+                          type: object
+                        name:
+                          type: string
+                        namespaces:
+                          items:
+                            type: string
+                          type: array
+                        selector:
+                          items:
+                            type: string
+                          type: array
+                      type: object
                     mysql:
                       properties:
                         collectorName:

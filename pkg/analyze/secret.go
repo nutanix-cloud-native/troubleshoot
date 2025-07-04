@@ -36,12 +36,9 @@ func (a *AnalyzeSecret) Analyze(getFile getCollectedFileContents, findFiles getC
 
 func (a *AnalyzeSecret) analyzeSecret(analyzer *troubleshootv1beta2.AnalyzeSecret, getCollectedFileContents func(string) ([]byte, error)) (*AnalyzeResult, error) {
 	filename := collect.GetSecretFileName(
-		&troubleshootv1beta2.Secret{
-			Namespace: analyzer.Namespace,
-			Name:      analyzer.SecretName,
-			Key:       analyzer.Key,
-		},
+		analyzer.Namespace,
 		analyzer.SecretName,
+		analyzer.Key,
 	)
 
 	secretData, err := getCollectedFileContents(filename)

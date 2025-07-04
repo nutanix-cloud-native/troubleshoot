@@ -87,6 +87,15 @@ type Logs struct {
 	Timestamps     bool       `json:"timestamps,omitempty" yaml:"timestamps,omitempty"`
 }
 
+type AllLogs struct {
+	CollectorMeta  `json:",inline" yaml:",inline"`
+	Name           string     `json:"name,omitempty" yaml:"name,omitempty"`
+	Selector       []string   `json:"selector" yaml:"selector"`
+	Namespaces     []string   `json:"namespaces,omitempty" yaml:"namespaces,omitempty"`
+	ContainerNames []string   `json:"containerNames,omitempty" yaml:"containerNames,omitempty"`
+	Limits         *LogLimits `json:"limits,omitempty" yaml:"omitempty"`
+}
+
 type Data struct {
 	CollectorMeta `json:",inline" yaml:",inline"`
 	Name          string `json:"name,omitempty" yaml:"name,omitempty"`
@@ -172,6 +181,40 @@ type Sysctl struct {
 	ImagePullPolicy string            `json:"imagePullPolicy,omitempty" yaml:"imagePullPolicy,omitempty"`
 	ImagePullSecret *ImagePullSecrets `json:"imagePullSecret,omitempty" yaml:"imagePullSecret,omitempty"`
 	Timeout         string            `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+}
+
+type ExecCopyFromHost struct {
+	CollectorMeta `json:",inline" yaml:",inline"`
+	Name          string `json:"name,omitempty" yaml:"name,omitempty"`
+	// Selector        []string          `json:"selector" yaml:"selector"`
+	Namespace       string            `json:"namespace" yaml:"namespace"`
+	Image           string            `json:"image" yaml:"image"`
+	ImagePullPolicy string            `json:"imagePullPolicy,omitempty" yaml:"imagePullPolicy,omitempty"`
+	ImagePullSecret *ImagePullSecrets `json:"imagePullSecret,omitempty" yaml:"imagePullSecret,omitempty"`
+	// The name of the pause image that will be executed after the collector
+	// image has completed. This container needs to include `tar` command in order
+	// to be able to send data back to troubleshoot process.
+	PauseImage string   `json:"pauseImage" yaml:"pauseImage"`
+	Timeout    string   `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Command    []string `json:"command,omitempty" yaml:"command,omitempty"`
+	Args       []string `json:"args,omitempty" yaml:"args,omitempty"`
+	WorkingDir string   `json:"workingDir,omitempty" yaml:"workingDir,omitempty"`
+	// Setting this setting to true will run containers on control plane nodes as
+	// well.
+	IncludeControlPlane bool `json:"includeControlPlane,omitempty" yaml:"includeControlPlane,omitempty"`
+	// A timeout that is applied for a waiting for daemonset to be running.
+	// Default: 30s
+	DaemonSetTimeout string   `json:"daemonSetTimeout,omitempty" yaml:"daemonSetTimeout,omitempty"`
+	Privileged       bool     `json:"privileged,omitempty" yaml:"privileged,omitempty"`
+	Capabilities     []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	RunAsUser        int64    `json:"runAsUser,omitempty" yaml:"runAsUser,omitempty"`
+	RunAsNonRoot     bool     `json:"runAsNonRoot,omitempty" yaml:"runAsNonRoot,omitempty"`
+	// Enable to run with various host NS
+	HostNetwork bool `json:"hostNetwork,omitempty" yaml:"hostNetwork,omitempty"`
+	HostIPC     bool `json:"hostIPC,omitempty" yaml:"hostIPC,omitempty"`
+	HostPID     bool `json:"hostPID,omitempty" yaml:"hostPID,omitempty"`
+	// DataPath         string   `json:"dataPath" yaml:"dataPath"`
+	ExtractArchive bool `json:"extractArchive,omitempty" yaml:"extractArchive,omitempty"`
 }
 
 type HTTP struct {
@@ -324,6 +367,7 @@ type Collect struct {
 	CustomMetrics    *CustomMetrics    `json:"customMetrics,omitempty" yaml:"customMetrics,omitempty"`
 	ConfigMap        *ConfigMap        `json:"configMap,omitempty" yaml:"configMap,omitempty"`
 	Logs             *Logs             `json:"logs,omitempty" yaml:"logs,omitempty"`
+	AllLogs          *AllLogs          `json:"allLogs,omitempty" yaml:"allLogs,omitempty"`
 	Run              *Run              `json:"run,omitempty" yaml:"run,omitempty"`
 	RunPod           *RunPod           `json:"runPod,omitempty" yaml:"runPod,omitempty"`
 	RunDaemonSet     *RunDaemonSet     `json:"runDaemonSet,omitempty" yaml:"runDaemonSet,omitempty"`
@@ -331,6 +375,7 @@ type Collect struct {
 	Data             *Data             `json:"data,omitempty" yaml:"data,omitempty"`
 	Copy             *Copy             `json:"copy,omitempty" yaml:"copy,omitempty"`
 	CopyFromHost     *CopyFromHost     `json:"copyFromHost,omitempty" yaml:"copyFromHost,omitempty"`
+	ExecCopyFromHost *ExecCopyFromHost `json:"execCopyFromHost,omitempty" yaml:"execCopyFromHost,omitempty"`
 	HTTP             *HTTP             `json:"http,omitempty" yaml:"http,omitempty"`
 	Postgres         *Database         `json:"postgres,omitempty" yaml:"postgres,omitempty"`
 	Mssql            *Database         `json:"mssql,omitempty" yaml:"mssql,omitempty"`
@@ -596,6 +641,11 @@ func (c *Collect) GetName() string {
 		name = c.Logs.CollectorName
 		selector = strings.Join(c.Logs.Selector, ",")
 	}
+	if c.AllLogs != nil {
+		collector = "all-logs"
+		name = c.AllLogs.CollectorName
+		selector = strings.Join(c.AllLogs.Selector, ",")
+	}
 	if c.Run != nil {
 		collector = "run"
 		name = c.Run.CollectorName
@@ -653,6 +703,10 @@ func (c *Collect) GetName() string {
 	if c.Ceph != nil {
 		collector = "ceph"
 		name = c.Ceph.CollectorName
+	}
+	if c.ExecCopyFromHost != nil {
+		collector = "exec-copy-from-host"
+		name = c.ExecCopyFromHost.CollectorName
 	}
 	if c.Longhorn != nil {
 		collector = "longhorn"
