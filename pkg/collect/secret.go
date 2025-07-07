@@ -87,8 +87,8 @@ func (c *CollectSecret) Collect(progressChan chan<- interface{}) (CollectorResul
 
 func secretToOutput(secretCollector *troubleshootv1beta2.Secret, secret *corev1.Secret) (string, []byte, error) {
 	foundSecret := SecretOutput{
-		Namespace: secretCollector.Namespace,
-		Name:      secretCollector.Name,
+		Namespace: secret.Namespace,
+		Name:      secret.Name,
 		Key:       secretCollector.Key,
 	}
 
@@ -138,11 +138,10 @@ func marshalSecretOutput(secretCollector *troubleshootv1beta2.Secret, secret Sec
 	return path, b, nil
 }
 
-func GetSecretFileName(secretCollector *troubleshootv1beta2.Secret, name string) string {
-	parts := []string{"secrets", secretCollector.Namespace, name}
-	// Only include key in filename when doing key-specific processing
-	if secretCollector.Key != "" && !secretCollector.IncludeAllData {
-		parts = append(parts, secretCollector.Key)
+func GetSecretFileName(namespace, name, key string) string {
+	parts := []string{"secrets", namespace, name}
+	if key != "" {
+		parts = append(parts, key)
 	}
 	return fmt.Sprintf("%s.json", filepath.Join(parts...))
 }
