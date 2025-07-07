@@ -102,12 +102,17 @@ EMPTY_NAMESPACE_FOUND:
 
 func (c *CollectClusterResources) Collect(progressChan chan<- interface{}) (CollectorResult, error) {
 	klog.V(4).Infof("CollectClusterResources.Collect")
-	client, err := kubernetes.NewForConfig(c.ClientConfig)
+
+	// Disable warnings when accessing deprecated API versions
+	clientConfig := rest.CopyConfig(c.ClientConfig)
+	clientConfig.WarningHandler = rest.NoWarnings{}
+
+	client, err := kubernetes.NewForConfig(clientConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	dynamicClient, err := dynamic.NewForConfig(c.ClientConfig)
+	dynamicClient, err := dynamic.NewForConfig(clientConfig)
 	if err != nil {
 		return nil, err
 	}
