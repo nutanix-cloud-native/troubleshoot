@@ -66,6 +66,10 @@ const (
 	CLUSTER_RESOURCES_INGRESS_CLASS                     = "ingress-classes"
 	CLUSTER_RESOURCES_VALIDATING_WEBHOOK_CONFIGURATIONS = "validating-webhook-configurations"
 	CLUSTER_RESOURCES_MUTATING_WEBHOOK_CONFIGURATIONS   = "mutating-webhook-configurations"
+	CLUSTER_RESOURCES_DEVICE_CLASSES                    = "device-classes"
+	CLUSTER_RESOURCES_RESOURCE_SLICES                   = "resource-slices"
+	CLUSTER_RESOURCES_RESOURCE_CLAIMS                   = "resource-claims"
+	CLUSTER_RESOURCES_RESOURCE_CLAIM_TEMPLATES          = "resource-claim-templates"
 
 	// SelfSubjectRulesReview evaluation responses
 	SELFSUBJECTRULESREVIEW_ERROR_AUTHORIZATION_WEBHOOK_UNSUPPORTED = "webhook authorizer does not support user rule resolution"

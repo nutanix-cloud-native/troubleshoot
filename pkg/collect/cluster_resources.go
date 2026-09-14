@@ -437,6 +437,30 @@ func (c *CollectClusterResources) Collect(progressChan chan<- interface{}) (Coll
 	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s.json", constants.CLUSTER_RESOURCES_MUTATING_WEBHOOK_CONFIGURATIONS)), bytes.NewBuffer(mutatingWebhookConfigurations))
 	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s-errors.json", constants.CLUSTER_RESOURCES_MUTATING_WEBHOOK_CONFIGURATIONS)), marshalErrors(mutatingWebhookConfigurationsErrors))
 
+	// Device Classes
+	deviceClasses, deviceClassErrors := deviceClasses(ctx, client)
+	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s.json", constants.CLUSTER_RESOURCES_DEVICE_CLASSES)), bytes.NewBuffer(deviceClasses))
+	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s-errors.json", constants.CLUSTER_RESOURCES_DEVICE_CLASSES)), marshalErrors(deviceClassErrors))
+
+	// Resource Slices
+	resourceSlices, resourceSliceErrors := resourceSlices(ctx, client)
+	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s.json", constants.CLUSTER_RESOURCES_RESOURCE_SLICES)), bytes.NewBuffer(resourceSlices))
+	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s-errors.json", constants.CLUSTER_RESOURCES_RESOURCE_SLICES)), marshalErrors(resourceSliceErrors))
+
+	// Resource Claims
+	resourceClaims, resourceClaimErrors := resourceClaims(ctx, client, namespaceNames)
+	for k, v := range resourceClaims {
+		output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, constants.CLUSTER_RESOURCES_RESOURCE_CLAIMS, k), bytes.NewBuffer(v))
+	}
+	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s-errors.json", constants.CLUSTER_RESOURCES_RESOURCE_CLAIMS)), marshalErrors(resourceClaimErrors))
+
+	// Resource Claim Templates
+	resourceClaimTemplates, resourceClaimTemplateErrors := resourceClaimTemplates(ctx, client, namespaceNames)
+	for k, v := range resourceClaimTemplates {
+		output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, constants.CLUSTER_RESOURCES_RESOURCE_CLAIM_TEMPLATES, k), bytes.NewBuffer(v))
+	}
+	output.SaveResult(c.BundlePath, path.Join(constants.CLUSTER_RESOURCES_DIR, fmt.Sprintf("%s-errors.json", constants.CLUSTER_RESOURCES_RESOURCE_CLAIM_TEMPLATES)), marshalErrors(resourceClaimTemplateErrors))
+
 	// Replicated License
 	licenseData, licenseErr := replicatedLicense(ctx, client, namespaceNames)
 	if licenseErr == nil {
@@ -750,7 +774,6 @@ func daemonsets(ctx context.Context, client *kubernetes.Clientset, namespaces []
 
 	for _, namespace := range namespaces {
 		daemonsets, err := client.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
-
 		if err != nil {
 			errorsByNamespace[namespace] = err.Error()
 			continue
@@ -2388,4 +2411,158 @@ func replicatedLicense(ctx context.Context, client *kubernetes.Clientset, namesp
 
 	// No replicated secret with a parsable license found in any namespace
 	return nil, fmt.Errorf("replicated secret with parsable license not found in any namespace")
+}
+
+func deviceClasses(ctx context.Context, client kubernetes.Interface) ([]byte, []string) {
+	ok, err := discovery.HasResource(client.Discovery(), "resource.k8s.io/v1", "DeviceClass")
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	deviceClasses, err := client.ResourceV1().DeviceClasses().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+
+	gvk, err := apiutil.GVKForObject(deviceClasses, scheme.Scheme)
+	if err == nil {
+		deviceClasses.GetObjectKind().SetGroupVersionKind(gvk)
+	}
+
+	for i, o := range deviceClasses.Items {
+		gvk, err := apiutil.GVKForObject(&o, scheme.Scheme)
+		if err == nil {
+			deviceClasses.Items[i].GetObjectKind().SetGroupVersionKind(gvk)
+		}
+	}
+
+	b, err := json.MarshalIndent(deviceClasses, "", "  ")
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+
+	return b, nil
+}
+
+func resourceSlices(ctx context.Context, client kubernetes.Interface) ([]byte, []string) {
+	ok, err := discovery.HasResource(client.Discovery(), "resource.k8s.io/v1", "ResourceSlice")
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	resourceSlices, err := client.ResourceV1().ResourceSlices().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+
+	gvk, err := apiutil.GVKForObject(resourceSlices, scheme.Scheme)
+	if err == nil {
+		resourceSlices.GetObjectKind().SetGroupVersionKind(gvk)
+	}
+
+	for i, o := range resourceSlices.Items {
+		gvk, err := apiutil.GVKForObject(&o, scheme.Scheme)
+		if err == nil {
+			resourceSlices.Items[i].GetObjectKind().SetGroupVersionKind(gvk)
+		}
+	}
+
+	b, err := json.MarshalIndent(resourceSlices, "", "  ")
+	if err != nil {
+		return nil, []string{err.Error()}
+	}
+
+	return b, nil
+}
+
+func resourceClaims(ctx context.Context, client kubernetes.Interface, namespaces []string) (map[string][]byte, map[string]string) {
+	ok, err := discovery.HasResource(client.Discovery(), "resource.k8s.io/v1", "ResourceClaim")
+	if err != nil {
+		return nil, map[string]string{"": err.Error()}
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	resourceClaimsByNamespace := make(map[string][]byte)
+	errorsByNamespace := make(map[string]string)
+
+	for _, namespace := range namespaces {
+		resourceClaims, err := client.ResourceV1().ResourceClaims(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			errorsByNamespace[namespace] = err.Error()
+			continue
+		}
+
+		gvk, err := apiutil.GVKForObject(resourceClaims, scheme.Scheme)
+		if err == nil {
+			resourceClaims.GetObjectKind().SetGroupVersionKind(gvk)
+		}
+
+		for i, o := range resourceClaims.Items {
+			gvk, err := apiutil.GVKForObject(&o, scheme.Scheme)
+			if err == nil {
+				resourceClaims.Items[i].GetObjectKind().SetGroupVersionKind(gvk)
+			}
+		}
+
+		b, err := json.MarshalIndent(resourceClaims, "", "  ")
+		if err != nil {
+			errorsByNamespace[namespace] = err.Error()
+			continue
+		}
+
+		resourceClaimsByNamespace[namespace+".json"] = b
+	}
+
+	return resourceClaimsByNamespace, errorsByNamespace
+}
+
+func resourceClaimTemplates(ctx context.Context, client kubernetes.Interface, namespaces []string) (map[string][]byte, map[string]string) {
+	ok, err := discovery.HasResource(client.Discovery(), "resource.k8s.io/v1", "ResourceClaimTemplate")
+	if err != nil {
+		return nil, map[string]string{"": err.Error()}
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	resourceClaimTemplatesByNamespace := make(map[string][]byte)
+	errorsByNamespace := make(map[string]string)
+
+	for _, namespace := range namespaces {
+		resourceClaimTemplates, err := client.ResourceV1().ResourceClaimTemplates(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			errorsByNamespace[namespace] = err.Error()
+			continue
+		}
+
+		gvk, err := apiutil.GVKForObject(resourceClaimTemplates, scheme.Scheme)
+		if err == nil {
+			resourceClaimTemplates.GetObjectKind().SetGroupVersionKind(gvk)
+		}
+
+		for i, o := range resourceClaimTemplates.Items {
+			gvk, err := apiutil.GVKForObject(&o, scheme.Scheme)
+			if err == nil {
+				resourceClaimTemplates.Items[i].GetObjectKind().SetGroupVersionKind(gvk)
+			}
+		}
+
+		b, err := json.MarshalIndent(resourceClaimTemplates, "", "  ")
+		if err != nil {
+			errorsByNamespace[namespace] = err.Error()
+			continue
+		}
+
+		resourceClaimTemplatesByNamespace[namespace+".json"] = b
+	}
+
+	return resourceClaimTemplatesByNamespace, errorsByNamespace
 }
