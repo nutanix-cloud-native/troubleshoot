@@ -18,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	policyv1beta1 "k8s.io/api/policy/v1beta1"
+	resourcev1 "k8s.io/api/resource/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apixfake "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -927,6 +928,445 @@ func createTestMutatingWebhookConfigurations(client kubernetes.Interface, names 
 		}, metav1.CreateOptions{})
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func Test_DeviceClasses(t *testing.T) {
+	tests := []struct {
+		name             string
+		deviceClassNames []string
+	}{
+		{
+			name:             "single device class",
+			deviceClassNames: []string{"gpu-class"},
+		},
+		{
+			name:             "multiple device classes",
+			deviceClassNames: []string{"gpu-class", "fpga-class"},
+		},
+		{
+			name:             "empty list",
+			deviceClassNames: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := testclient.NewClientset()
+			ctx := context.Background()
+			err := createTestDeviceClasses(client, tt.deviceClassNames)
+			require.NoError(t, err)
+
+			fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+			if !ok {
+				t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+			}
+			fakeDiscovery.Resources = []*metav1.APIResourceList{
+				{
+					GroupVersion: "resource.k8s.io/v1",
+					APIResources: []metav1.APIResource{
+						{Kind: "DeviceClass"},
+					},
+				},
+			}
+
+			data, errs := deviceClasses(ctx, client)
+			assert.Empty(t, errs)
+			assert.NotNil(t, data)
+
+			var list resourcev1.DeviceClassList
+			err = json.Unmarshal(data, &list)
+			require.NoError(t, err)
+			assert.Len(t, list.Items, len(tt.deviceClassNames))
+			for _, item := range list.Items {
+				assert.Contains(t, tt.deviceClassNames, item.Name)
+			}
+		})
+	}
+}
+
+func Test_DeviceClasses_NotAvailable(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	// Leave fakeDiscovery.Resources empty — no resource.k8s.io/v1 resources advertised.
+	data, errs := deviceClasses(ctx, client)
+	assert.Nil(t, data)
+	assert.Nil(t, errs)
+}
+
+func Test_DeviceClasses_PermissionDenied(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+	if !ok {
+		t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+	}
+	fakeDiscovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "resource.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Kind: "DeviceClass"},
+			},
+		},
+	}
+
+	client.PrependReactor("list", "deviceclasses", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("deviceclasses.resource.k8s.io is forbidden: User \"system:serviceaccount:default:default\" cannot list resource \"deviceclasses\" in API group \"resource.k8s.io\" at the cluster scope")
+	})
+
+	data, errs := deviceClasses(ctx, client)
+	assert.Nil(t, data)
+	require.NotEmpty(t, errs)
+	assert.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "forbidden")
+}
+
+func createTestDeviceClasses(client kubernetes.Interface, names []string) error {
+	for _, name := range names {
+		_, err := client.ResourceV1().DeviceClasses().Create(context.Background(), &resourcev1.DeviceClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+			},
+		}, metav1.CreateOptions{})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func Test_ResourceSlices(t *testing.T) {
+	tests := []struct {
+		name               string
+		resourceSliceNames []string
+	}{
+		{
+			name:               "single resource slice",
+			resourceSliceNames: []string{"node-a-gpus"},
+		},
+		{
+			name:               "multiple resource slices",
+			resourceSliceNames: []string{"node-a-gpus", "node-b-gpus"},
+		},
+		{
+			name:               "empty list",
+			resourceSliceNames: []string{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := testclient.NewClientset()
+			ctx := context.Background()
+			err := createTestResourceSlices(client, tt.resourceSliceNames)
+			require.NoError(t, err)
+
+			fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+			if !ok {
+				t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+			}
+			fakeDiscovery.Resources = []*metav1.APIResourceList{
+				{
+					GroupVersion: "resource.k8s.io/v1",
+					APIResources: []metav1.APIResource{
+						{Kind: "ResourceSlice"},
+					},
+				},
+			}
+
+			data, errs := resourceSlices(ctx, client)
+			assert.Empty(t, errs)
+			assert.NotNil(t, data)
+
+			var list resourcev1.ResourceSliceList
+			err = json.Unmarshal(data, &list)
+			require.NoError(t, err)
+			assert.Len(t, list.Items, len(tt.resourceSliceNames))
+			for _, item := range list.Items {
+				assert.Contains(t, tt.resourceSliceNames, item.Name)
+			}
+		})
+	}
+}
+
+func Test_ResourceSlices_NotAvailable(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	data, errs := resourceSlices(ctx, client)
+	assert.Nil(t, data)
+	assert.Nil(t, errs)
+}
+
+func Test_ResourceSlices_PermissionDenied(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+	if !ok {
+		t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+	}
+	fakeDiscovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "resource.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Kind: "ResourceSlice"},
+			},
+		},
+	}
+
+	client.PrependReactor("list", "resourceslices", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("resourceslices.resource.k8s.io is forbidden: User \"system:serviceaccount:default:default\" cannot list resource \"resourceslices\" in API group \"resource.k8s.io\" at the cluster scope")
+	})
+
+	data, errs := resourceSlices(ctx, client)
+	assert.Nil(t, data)
+	require.NotEmpty(t, errs)
+	assert.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "forbidden")
+}
+
+func createTestResourceSlices(client kubernetes.Interface, names []string) error {
+	for _, name := range names {
+		_, err := client.ResourceV1().ResourceSlices().Create(context.Background(), &resourcev1.ResourceSlice{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+			},
+			Spec: resourcev1.ResourceSliceSpec{
+				Driver: "test-driver.example.com",
+				Pool:   resourcev1.ResourcePool{Name: "test-pool"},
+			},
+		}, metav1.CreateOptions{})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func Test_ResourceClaims(t *testing.T) {
+	tests := []struct {
+		name               string
+		resourceClaimNames []string
+		namespaces         []string
+	}{
+		{
+			name:               "single namespace",
+			resourceClaimNames: []string{"claim-a"},
+			namespaces:         []string{"default"},
+		},
+		{
+			name:               "multiple namespaces",
+			resourceClaimNames: []string{"claim-a"},
+			namespaces:         []string{"default", "test"},
+		},
+		{
+			name:               "multiple claims in different namespaces",
+			resourceClaimNames: []string{"claim-a", "claim-b"},
+			namespaces:         []string{"default", "test"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := testclient.NewClientset()
+			ctx := context.Background()
+			err := createTestResourceClaims(client, tt.resourceClaimNames, tt.namespaces)
+			require.NoError(t, err)
+
+			fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+			if !ok {
+				t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+			}
+			fakeDiscovery.Resources = []*metav1.APIResourceList{
+				{
+					GroupVersion: "resource.k8s.io/v1",
+					APIResources: []metav1.APIResource{
+						{Kind: "ResourceClaim"},
+					},
+				},
+			}
+
+			claims, errs := resourceClaims(ctx, client, tt.namespaces)
+			assert.Empty(t, errs)
+			assert.Equal(t, len(tt.namespaces), len(claims))
+
+			for _, ns := range tt.namespaces {
+				assert.NotEmpty(t, claims[ns+".json"])
+				var list resourcev1.ResourceClaimList
+				err := json.Unmarshal(claims[ns+".json"], &list)
+				require.NoError(t, err)
+				assert.Len(t, list.Items, len(tt.resourceClaimNames))
+				for _, item := range list.Items {
+					assert.Contains(t, tt.resourceClaimNames, item.Name)
+				}
+			}
+		})
+	}
+}
+
+func Test_ResourceClaims_NotAvailable(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	claims, errs := resourceClaims(ctx, client, []string{"default"})
+	assert.Nil(t, claims)
+	assert.Nil(t, errs)
+}
+
+func Test_ResourceClaims_PermissionDenied(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+	if !ok {
+		t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+	}
+	fakeDiscovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "resource.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Kind: "ResourceClaim"},
+			},
+		},
+	}
+
+	client.PrependReactor("list", "resourceclaims", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("resourceclaims.resource.k8s.io is forbidden: User \"system:serviceaccount:default:default\" cannot list resource \"resourceclaims\" in API group \"resource.k8s.io\" in the namespace \"default\"")
+	})
+
+	claims, errs := resourceClaims(ctx, client, []string{"default"})
+	assert.Empty(t, claims)
+	require.NotEmpty(t, errs)
+	assert.Contains(t, errs["default"], "forbidden")
+}
+
+func createTestResourceClaims(client kubernetes.Interface, names []string, namespaces []string) error {
+	for _, ns := range namespaces {
+		for _, name := range names {
+			_, err := client.ResourceV1().ResourceClaims(ns).Create(context.Background(), &resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: ns,
+				},
+			}, metav1.CreateOptions{})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func Test_ResourceClaimTemplates(t *testing.T) {
+	tests := []struct {
+		name                       string
+		resourceClaimTemplateNames []string
+		namespaces                 []string
+	}{
+		{
+			name:                       "single namespace",
+			resourceClaimTemplateNames: []string{"gpu-template"},
+			namespaces:                 []string{"default"},
+		},
+		{
+			name:                       "multiple namespaces",
+			resourceClaimTemplateNames: []string{"gpu-template"},
+			namespaces:                 []string{"default", "test"},
+		},
+		{
+			name:                       "multiple templates in different namespaces",
+			resourceClaimTemplateNames: []string{"gpu-template", "fpga-template"},
+			namespaces:                 []string{"default", "test"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := testclient.NewClientset()
+			ctx := context.Background()
+			err := createTestResourceClaimTemplates(client, tt.resourceClaimTemplateNames, tt.namespaces)
+			require.NoError(t, err)
+
+			fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+			if !ok {
+				t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+			}
+			fakeDiscovery.Resources = []*metav1.APIResourceList{
+				{
+					GroupVersion: "resource.k8s.io/v1",
+					APIResources: []metav1.APIResource{
+						{Kind: "ResourceClaimTemplate"},
+					},
+				},
+			}
+
+			templates, errs := resourceClaimTemplates(ctx, client, tt.namespaces)
+			assert.Empty(t, errs)
+			assert.Equal(t, len(tt.namespaces), len(templates))
+
+			for _, ns := range tt.namespaces {
+				assert.NotEmpty(t, templates[ns+".json"])
+				var list resourcev1.ResourceClaimTemplateList
+				err := json.Unmarshal(templates[ns+".json"], &list)
+				require.NoError(t, err)
+				assert.Len(t, list.Items, len(tt.resourceClaimTemplateNames))
+				for _, item := range list.Items {
+					assert.Contains(t, tt.resourceClaimTemplateNames, item.Name)
+				}
+			}
+		})
+	}
+}
+
+func Test_ResourceClaimTemplates_NotAvailable(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	templates, errs := resourceClaimTemplates(ctx, client, []string{"default"})
+	assert.Nil(t, templates)
+	assert.Nil(t, errs)
+}
+
+func Test_ResourceClaimTemplates_PermissionDenied(t *testing.T) {
+	client := testclient.NewClientset()
+	ctx := context.Background()
+
+	fakeDiscovery, ok := client.Discovery().(*fakediscovery.FakeDiscovery)
+	if !ok {
+		t.Fatalf("could not convert Discovery() to *FakeDiscovery")
+	}
+	fakeDiscovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "resource.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Kind: "ResourceClaimTemplate"},
+			},
+		},
+	}
+
+	client.PrependReactor("list", "resourceclaimtemplates", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("resourceclaimtemplates.resource.k8s.io is forbidden: User \"system:serviceaccount:default:default\" cannot list resource \"resourceclaimtemplates\" in API group \"resource.k8s.io\" in the namespace \"default\"")
+	})
+
+	templates, errs := resourceClaimTemplates(ctx, client, []string{"default"})
+	assert.Empty(t, templates)
+	require.NotEmpty(t, errs)
+	assert.Contains(t, errs["default"], "forbidden")
+}
+
+func createTestResourceClaimTemplates(client kubernetes.Interface, names []string, namespaces []string) error {
+	for _, ns := range namespaces {
+		for _, name := range names {
+			_, err := client.ResourceV1().ResourceClaimTemplates(ns).Create(context.Background(), &resourcev1.ResourceClaimTemplate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: ns,
+				},
+			}, metav1.CreateOptions{})
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
