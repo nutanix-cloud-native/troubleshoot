@@ -265,11 +265,13 @@ func TestSecret(t *testing.T) {
 				},
 			},
 			want: CollectorResult{
-				"secrets/test-namespace/test-secret.json": mustJSONMarshalIndent(t, SecretOutput{
+				"secrets/test-namespace/test-secret/database-password.json": mustJSONMarshalIndent(t, SecretOutput{
 					Namespace:    "test-namespace",
 					Name:         "test-secret",
-					Key:          "database-password",
 					SecretExists: true,
+					Key:          "database-password",
+					KeyExists:    true,
+					Value:        "secret123",
 					Data: map[string]string{
 						"database-password": "secret123",
 						"api-key":           "abc123xyz",

@@ -10,11 +10,13 @@ import (
 
 	"github.com/pkg/errors"
 	troubleshootv1beta2 "github.com/replicatedhq/troubleshoot/pkg/apis/troubleshoot/v1beta2"
+	"github.com/replicatedhq/troubleshoot/pkg/k8sutil"
 	corev1 "k8s.io/api/core/v1"
 	kuberneteserrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 )
 
 type SecretOutput struct {
@@ -49,8 +51,20 @@ func (c *CollectSecret) Collect(progressChan chan<- interface{}) (CollectorResul
 	output := NewResult()
 
 	secrets := []corev1.Secret{}
+	namespace := c.Collector.Namespace
+
 	if c.Collector.Name != "" {
-		secret, err := c.Client.CoreV1().Secrets(c.Collector.Namespace).Get(c.Context, c.Collector.Name, metav1.GetOptions{})
+		if namespace == "" {
+			kubeconfig := k8sutil.GetKubeconfig()
+			ns, _, err := kubeconfig.Namespace()
+			klog.V(2).Infof("no namespace was set for secret '%s': using namespace '%s' from current kubeconfig context", c.Collector.Name, ns)
+			if err != nil {
+				return nil, errors.Wrapf(err, "a namespace was not specified for secret '%s' and could not be discovered from kubeconfig", c.Collector.Name)
+			}
+			namespace = ns
+		}
+		klog.V(1).Infof("looking for secret '%s' in namespace '%s'", c.Collector.Name, namespace)
+		secret, err := c.Client.CoreV1().Secrets(namespace).Get(c.Context, c.Collector.Name, metav1.GetOptions{})
 		if err != nil {
 			if kuberneteserrors.IsNotFound(err) {
 				filePath, encoded, err := secretToOutput(c.Collector, nil)
@@ -64,12 +78,12 @@ func (c *CollectSecret) Collect(progressChan chan<- interface{}) (CollectorResul
 		}
 		secrets = append(secrets, *secret)
 	} else if len(c.Collector.Selector) > 0 {
-		ss, err := listSecretsForSelector(c.Context, c.Client, c.Collector.Namespace, c.Collector.Selector)
+		cms, err := listSecretsForSelector(c.Context, c.Client, c.Collector.Namespace, c.Collector.Selector)
 		if err != nil {
 			output.SaveResult(c.BundlePath, GetSecretErrorsFileName(c.Collector), marshalErrors([]string{err.Error()}))
 			return output, nil
 		}
-		secrets = append(secrets, ss...)
+		secrets = append(secrets, cms...)
 	} else {
 		return nil, errors.New("either name or selector must be specified")
 	}
@@ -87,19 +101,22 @@ func (c *CollectSecret) Collect(progressChan chan<- interface{}) (CollectorResul
 
 func secretToOutput(secretCollector *troubleshootv1beta2.Secret, secret *corev1.Secret) (string, []byte, error) {
 	foundSecret := SecretOutput{
-		Namespace: secret.Namespace,
-		Name:      secret.Name,
+		Namespace: secretCollector.Namespace,
+		Name:      secretCollector.Name,
 		Key:       secretCollector.Key,
 	}
 
 	if secret != nil {
 		foundSecret.SecretExists = true
+		foundSecret.Name = secret.Name
+		foundSecret.Namespace = secret.Namespace
 		if secretCollector.IncludeAllData {
 			foundSecret.Data = make(map[string]string)
 			for k, v := range secret.Data {
 				foundSecret.Data[k] = string(v)
 			}
-		} else if secretCollector.Key != "" {
+		}
+		if secretCollector.Key != "" {
 			if val, ok := secret.Data[secretCollector.Key]; ok {
 				foundSecret.KeyExists = true
 				if secretCollector.IncludeValue {
@@ -128,7 +145,7 @@ func listSecretsForSelector(ctx context.Context, client kubernetes.Interface, na
 }
 
 func marshalSecretOutput(secretCollector *troubleshootv1beta2.Secret, secret SecretOutput) (string, []byte, error) {
-	path := GetSecretFileName(secret.Namespace, secret.Name, secret.Key)
+	path := GetSecretFileName(secret.Namespace, secret.Name, secretCollector.Key)
 
 	b, err := json.MarshalIndent(secret, "", "  ")
 	if err != nil {
@@ -153,8 +170,7 @@ func GetSecretErrorsFileName(secretCollector *troubleshootv1beta2.Secret) string
 	} else {
 		parts = append(parts, selectorToString(secretCollector.Selector))
 	}
-	// Only include key in filename when doing key-specific processing
-	if secretCollector.Key != "" && !secretCollector.IncludeAllData {
+	if secretCollector.Key != "" {
 		parts = append(parts, secretCollector.Key)
 	}
 	return fmt.Sprintf("%s.json", filepath.Join(parts...))
