@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -49,7 +50,7 @@ const (
 	// shared between the init container and pause container. The container that
 	// is producing data that should be copied to the diagnostics bundle should
 	// write data to this path.
-	execCopyFromHostSharedVolumePath = "/host/output"
+	execCopyFromHostSharedVolumePath = "/output"
 
 	// execCopyFromHostHostVolumePath is a path that is mounted to the container
 	// that is collecting data from the host node.
@@ -118,8 +119,11 @@ func (c *CollectExecCopyFromHost) Collect(progressChan chan<- interface{}) (Coll
 	}
 	defer cancel()
 
-	errCh := make(chan error, 1)
-	resultCh := make(chan map[string][]byte, 1)
+	type collectOutcome struct {
+		result CollectorResult
+		err    error
+	}
+	outcomeCh := make(chan collectOutcome, 1)
 	go func() {
 		var outputPath string
 		if c.Collector.Name != "" {
@@ -131,23 +135,17 @@ func (c *CollectExecCopyFromHost) Collect(progressChan chan<- interface{}) (Coll
 			childCtx, c.ClientConfig, c.Client, c.Collector,
 			outputPath, labels, namespace,
 		)
-		if err != nil {
-			errCh <- err
-		} else {
-			resultCh <- b
-		}
+		outcomeCh <- collectOutcome{result: b, err: err}
 	}()
 
 	select {
 	case <-childCtx.Done():
 		return nil, errors.New("timeout")
-	case result := <-resultCh:
-		return result, nil
-	case err := <-errCh:
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, errors.New("timeout")
+	case outcome := <-outcomeCh:
+		if errors.Is(outcome.err, context.DeadlineExceeded) {
+			return outcome.result, errors.New("timeout")
 		}
-		return nil, err
+		return outcome.result, outcome.err
 	}
 }
 
@@ -363,12 +361,8 @@ func (c *CollectExecCopyFromHost) execCopyFromHostGetFilesFromPods(
 		return nil, errors.Wrap(err, "list pods")
 	}
 
-	clientSet, err := kubernetes.NewForConfig(c.ClientConfig)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create k8s clientset")
-	}
-
 	output := NewResult()
+	var podErrs []string
 	for _, pod := range pods.Items {
 
 		outputNodePath := filepath.Join(outputPath, pod.Spec.NodeName)
@@ -378,6 +372,11 @@ func (c *CollectExecCopyFromHost) execCopyFromHostGetFilesFromPods(
 		)
 
 		if err != nil {
+			nodeName := pod.Spec.NodeName
+			if nodeName == "" {
+				nodeName = pod.Name
+			}
+			podErrs = append(podErrs, fmt.Sprintf("%s: %v", nodeName, err))
 
 			// Save error message from the copy operation
 			msg := fmt.Sprintf("[%s] failed to copy data from the pod container pause: %s", time.Now().String(), err.Error())
@@ -398,7 +397,7 @@ func (c *CollectExecCopyFromHost) execCopyFromHostGetFilesFromPods(
 			// Attempt to get a stdout and data from the collector initcontainer
 			for _, initContainer := range pod.Spec.InitContainers {
 				logPath := filepath.Join(outputNodePath, fmt.Sprintf("pod-%s", initContainer.Name))
-				copyContainerLogsResult, copyErr := copyContainerLogs(ctx, c.BundlePath, clientSet, pod, initContainer.Name, logPath, false)
+				copyContainerLogsResult, copyErr := copyContainerLogs(ctx, c.BundlePath, client, pod, initContainer.Name, logPath, false)
 				if copyErr != nil {
 					timestampedCopyErr := fmt.Sprintf("[%s] %s", time.Now().String(), copyErr.Error())
 					output.SaveResult(c.BundlePath, fmt.Sprintf("%s-log-copy-error.txt", logPath), bytes.NewReader([]byte(timestampedCopyErr)))
@@ -433,6 +432,10 @@ func (c *CollectExecCopyFromHost) execCopyFromHostGetFilesFromPods(
 		}
 	}
 
+	if len(podErrs) > 0 {
+		return output, errors.Errorf("failed to copy data from pods: %s", strings.Join(podErrs, "; "))
+	}
+
 	return output, nil
 }
 
@@ -445,7 +448,7 @@ func copyResultsToOutput(dst, src CollectorResult) {
 func copyContainerLogs(
 	ctx context.Context,
 	bundlePath string,
-	client *kubernetes.Clientset,
+	client kubernetes.Interface,
 	pod corev1.Pod,
 	container string,
 	logPath string,
