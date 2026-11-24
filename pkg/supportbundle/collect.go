@@ -217,8 +217,9 @@ func runCollectors(ctx context.Context, collectors []*troubleshootv1beta2.Collec
 				// Always store bytes in-memory for consistency with memory-only bundles
 				allCollectedData[errorPath] = errorJSON
 				// Also attempt to persist to disk best-effort
-				if writeErr := os.MkdirAll(filepath.Join(bundlePath, "collector-errors"), 0755); writeErr == nil {
-					_ = os.WriteFile(filepath.Join(bundlePath, errorPath), errorJSON, 0644)
+				fullErrorPath := filepath.Join(bundlePath, errorPath)
+				if writeErr := os.MkdirAll(filepath.Dir(fullErrorPath), 0755); writeErr == nil {
+					_ = os.WriteFile(fullErrorPath, errorJSON, 0644)
 				}
 			}
 		}
@@ -332,8 +333,9 @@ func runLocalHostCollectors(ctx context.Context, hostCollectors []*troubleshootv
 				// Always store bytes in-memory for consistency with memory-only bundles
 				allCollectedData[errorPath] = errorJSON
 				// Also attempt to persist to disk best-effort
-				if mkErr := os.MkdirAll(filepath.Join(bundlePath, "host-collectors/errors"), 0755); mkErr == nil {
-					_ = os.WriteFile(filepath.Join(bundlePath, errorPath), errorJSON, 0644)
+				fullErrorPath := filepath.Join(bundlePath, errorPath)
+				if mkErr := os.MkdirAll(filepath.Dir(fullErrorPath), 0755); mkErr == nil {
+					_ = os.WriteFile(fullErrorPath, errorJSON, 0644)
 				}
 			}
 		}

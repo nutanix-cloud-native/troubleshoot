@@ -452,8 +452,9 @@ func CollectRemoteWithContext(ctx context.Context, opts CollectOpts, p *troubles
 				allCollectedData[errorPath] = errorJSON
 				// Best-effort write to disk if bundlePath provided
 				if opts.BundlePath != "" {
-					if writeErr := os.MkdirAll(filepath.Join(opts.BundlePath, "collector-errors"), 0755); writeErr == nil {
-						_ = os.WriteFile(filepath.Join(opts.BundlePath, errorPath), errorJSON, 0644)
+					fullErrorPath := filepath.Join(opts.BundlePath, errorPath)
+					if writeErr := os.MkdirAll(filepath.Dir(fullErrorPath), 0755); writeErr == nil {
+						_ = os.WriteFile(fullErrorPath, errorJSON, 0644)
 					}
 				}
 			}
